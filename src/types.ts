@@ -1,0 +1,66 @@
+export const GROCERY_CATEGORIES = [
+  'Gemüse & Obst',
+  'Fleisch & Fisch',
+  'Milchprodukte & Eier',
+  'Backwaren',
+  'Trockenvorräte',
+  'Tiefkühlprodukte',
+  'Konserven & Eingelegtes',
+  'Saucen & Gewürze',
+  'Getränke',
+  'Sonstiges',
+] as const
+
+export type GroceryCategory = (typeof GROCERY_CATEGORIES)[number]
+
+export const RECIPE_CATEGORIES = ['Vegetarisch', 'Fleisch', 'Vegan', 'Fisch', 'Sonstiges'] as const
+export type RecipeCategory = (typeof RECIPE_CATEGORIES)[number]
+
+export const UNITS = ['g', 'kg', 'ml', 'l', 'TL', 'EL', 'Stück', 'Packung', 'Dose', 'Prise', 'Bund'] as const
+export type Unit = (typeof UNITS)[number]
+
+export const MEAL_TYPES = ['Frühstück', 'Mittagessen', 'Nachtessen', 'Snacks', 'Sonstiges'] as const
+export type MealType = (typeof MEAL_TYPES)[number]
+
+export type Ingredient = {
+  id: string
+  name: string
+  normalizedName: string
+  quantity: number
+  unit: string
+  category: GroceryCategory
+}
+
+export type Recipe = {
+  id: string
+  name: string
+  category: string
+  servings?: number
+  imageUrl?: string
+  ingredients: Ingredient[]
+}
+
+export type PlannedRecipe = {
+  id: string
+  recipeId?: string
+  mealType: MealType
+  servings: number
+  ingredient?: Ingredient
+}
+
+export type WeeklyPlan = {
+  mealSlots: PlannedRecipe[]
+  weekStart?: string
+  selectedRecipeIds?: string[]
+}
+
+export type ShoppingItem = {
+  id: string
+  name: string
+  quantity: number
+  unit: string
+  category: GroceryCategory
+  checked: boolean
+}
+
+export type Tab = 'planner' | 'recipes' | 'shopping'
