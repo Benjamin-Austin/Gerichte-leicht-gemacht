@@ -1,4 +1,5 @@
-import type { Ingredient, ShoppingItem } from '../types'
+import { ingredientCatalog } from '../data/ingredientCatalog'
+import type { CatalogItem, GroceryCategory, Ingredient, ShoppingItem } from '../types'
 
 const pluralAliases: Record<string, string> = {
   äpfel: 'apfel',
@@ -14,6 +15,38 @@ const pluralAliases: Record<string, string> = {
 export function normalizeIngredientName(name: string): string {
   const normalized = name.trim().toLocaleLowerCase('de-DE').replace(/\s+/g, ' ')
   return pluralAliases[normalized] ?? normalized.replace(/s$/, '')
+}
+
+export function normalizeSearchText(value: string): string {
+  return value.trim().toLocaleLowerCase('de-DE').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+export function findCatalogItem(name: string): CatalogItem | undefined {
+  const normalized = normalizeSearchText(name)
+  return ingredientCatalog.find((item) => [item.name, ...(item.aliases ?? [])].some((candidate) => normalizeSearchText(candidate) === normalized))
+}
+
+export function searchCatalog(query: string): CatalogItem[] {
+  const normalized = normalizeSearchText(query)
+  if (!normalized) return []
+  return ingredientCatalog.filter((item) => [item.name, ...(item.aliases ?? [])].some((candidate) => normalizeSearchText(candidate).includes(normalized)))
+}
+
+export function inferShoppingCategory(name: string, fallback: GroceryCategory = 'Sonstiges'): GroceryCategory {
+  return findCatalogItem(name)?.shoppingCategory ?? fallback
+}
+
+export function createIngredient(name: string, quantity = 1, unit?: string): Ingredient {
+  const catalogItem = findCatalogItem(name)
+  const displayName = catalogItem?.name ?? name.trim()
+  return {
+    id: `${catalogItem?.id ?? normalizeIngredientName(displayName)}-${Date.now()}`,
+    name: displayName,
+    normalizedName: normalizeIngredientName(displayName),
+    quantity,
+    unit: unit ?? catalogItem?.defaultUnit ?? 'Stück',
+    category: catalogItem?.shoppingCategory ?? 'Sonstiges',
+  }
 }
 
 export function formatQuantity(quantity: number, unit: string): string {
@@ -48,7 +81,7 @@ export function mergeIngredients(ingredients: Ingredient[]): ShoppingItem[] {
         name: ingredient.name.trim(),
         quantity: ingredient.quantity,
         unit,
-        category: ingredient.category,
+        category: inferShoppingCategory(ingredient.name, ingredient.category),
         checked: false,
       })
     }

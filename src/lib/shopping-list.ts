@@ -1,4 +1,4 @@
-import type { PlannedRecipe, Recipe, ShoppingItem } from '../types'
+import { GROCERY_CATEGORIES, type PlannedRecipe, type Recipe, type ShoppingItem } from '../types'
 import { mergeIngredients, roundShoppingQuantity } from './ingredients'
 
 export type PlannedRecipeInput = PlannedRecipe | { recipeId: string, servings: number }
@@ -22,9 +22,10 @@ export function generateShoppingList(recipes: Recipe[], plannedRecipes: PlannedR
 }
 
 export function groupByCategory(items: ShoppingItem[]): Record<string, ShoppingItem[]> {
-  return items.reduce<Record<string, ShoppingItem[]>>((groups, item) => {
+  const grouped = items.reduce<Record<string, ShoppingItem[]>>((groups, item) => {
     groups[item.category] ??= []
     groups[item.category].push(item)
     return groups
   }, {})
+  return Object.fromEntries(GROCERY_CATEGORIES.filter((category) => grouped[category]).map((category) => [category, grouped[category].sort((left, right) => left.name.localeCompare(right.name, 'de'))]))
 }

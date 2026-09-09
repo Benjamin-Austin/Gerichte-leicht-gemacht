@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { formatQuantity, mergeIngredients, normalizeIngredientName, roundShoppingQuantity } from './ingredients'
-import { generateShoppingList } from './shopping-list'
+import { formatQuantity, inferShoppingCategory, mergeIngredients, normalizeIngredientName, roundShoppingQuantity, searchCatalog } from './ingredients'
+import { generateShoppingList, groupByCategory } from './shopping-list'
 import type { Recipe } from '../types'
 import type { Ingredient } from '../types'
 
@@ -60,5 +60,25 @@ describe('ingredient logic', () => {
       { recipeId: 'breakfast', servings: 1 },
       { id: 'food-1', mealType: 'Frühstück', servings: 1, ingredient: banana },
     ])).toEqual([expect.objectContaining({ name: 'Bananen', quantity: 2, unit: 'Stück' })])
+  })
+
+  it('does not return the catalog before a search starts', () => {
+    expect(searchCatalog('')).toEqual([])
+    expect(searchCatalog('soja').map((item) => item.name)).toContain('Sojasauce')
+    expect(searchCatalog('schoko').map((item) => item.name)).toContain('Schokolade')
+  })
+
+  it('infers food and non-food shopping categories centrally', () => {
+    expect(inferShoppingCategory('Spaghetti')).toBe('Trockenvorräte')
+    expect(inferShoppingCategory('Waschmittel')).toBe('Non-Food')
+    expect(inferShoppingCategory('unbekannter Artikel')).toBe('Sonstiges')
+  })
+
+  it('keeps grocery groups in the fixed shopping order', () => {
+    const groups = groupByCategory([
+      { id: 'a', name: 'Wasser', quantity: 1, unit: 'l', category: 'Getränke', checked: false },
+      { id: 'b', name: 'Banane', quantity: 1, unit: 'Stück', category: 'Gemüse & Früchte', checked: false },
+    ])
+    expect(Object.keys(groups)).toEqual(['Gemüse & Früchte', 'Getränke'])
   })
 })

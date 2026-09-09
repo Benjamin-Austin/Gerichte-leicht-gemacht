@@ -1,13 +1,14 @@
 export const GROCERY_CATEGORIES = [
-  'Gemüse & Obst',
-  'Fleisch & Fisch',
-  'Milchprodukte & Eier',
+  'Gemüse & Früchte',
   'Backwaren',
-  'Trockenvorräte',
+  'Milchprodukte & Käse',
+  'Fleisch & Fisch',
   'Tiefkühlprodukte',
-  'Konserven & Eingelegtes',
   'Saucen & Gewürze',
+  'Snacks',
+  'Trockenvorräte',
   'Getränke',
+  'Non-Food',
   'Sonstiges',
 ] as const
 
@@ -31,12 +32,26 @@ export type Ingredient = {
   category: GroceryCategory
 }
 
+export type CatalogItem = {
+  id: string
+  name: string
+  aliases?: string[]
+  shoppingCategory: GroceryCategory
+  type: 'food' | 'non-food'
+  defaultUnit?: string
+}
+
 export type Recipe = {
   id: string
   name: string
   category: string
   servings?: number
   imageUrl?: string
+  preparation?: string[]
+  videoUrl?: string
+  preparationTime?: string
+  difficulty?: string
+  notes?: string
   ingredients: Ingredient[]
 }
 

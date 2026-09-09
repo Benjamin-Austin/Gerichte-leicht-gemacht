@@ -1,5 +1,5 @@
-import { MEAL_TYPES, RECIPE_CATEGORIES, type MealType, type Recipe, type ShoppingItem, type WeeklyPlan } from '../types'
-import { normalizeIngredientName } from './ingredients'
+import { GROCERY_CATEGORIES, MEAL_TYPES, RECIPE_CATEGORIES, type GroceryCategory, type MealType, type Recipe, type ShoppingItem, type WeeklyPlan } from '../types'
+import { inferShoppingCategory, normalizeIngredientName } from './ingredients'
 
 const keys = {
   recipes: 'sonntagskueche:recipes:v1',
@@ -38,7 +38,28 @@ function normalizeRecipe(recipe: Recipe): Recipe {
   const category = RECIPE_CATEGORIES.includes(recipe.category as (typeof RECIPE_CATEGORIES)[number])
     ? recipe.category
     : categoryMigration[recipe.category] ?? 'Sonstiges'
-  return { ...recipe, category, servings: Number.isFinite(recipe.servings) && (recipe.servings ?? 0) >= 1 ? recipe.servings : 4 }
+  return {
+    ...recipe,
+    category,
+    servings: Number.isFinite(recipe.servings) && (recipe.servings ?? 0) >= 1 ? recipe.servings : 4,
+    preparation: Array.isArray(recipe.preparation) ? recipe.preparation.filter(Boolean) : undefined,
+    ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients.filter((ingredient) => ingredient?.name).map((ingredient) => ({
+      ...ingredient,
+      normalizedName: normalizeIngredientName(ingredient.name),
+      category: normalizeGroceryCategory(ingredient.category, ingredient.name),
+    })) : [],
+  }
+}
+
+const groceryMigration: Record<string, GroceryCategory> = {
+  'Gemüse & Obst': 'Gemüse & Früchte',
+  'Milchprodukte & Eier': 'Milchprodukte & Käse',
+  'Konserven & Eingelegtes': 'Trockenvorräte',
+}
+
+function normalizeGroceryCategory(category: string | undefined, name: string): GroceryCategory {
+  if (category && GROCERY_CATEGORIES.includes(category as GroceryCategory)) return category as GroceryCategory
+  return groceryMigration[category ?? ''] ?? inferShoppingCategory(name)
 }
 
 function normalizePlan(plan: WeeklyPlan): WeeklyPlan {
@@ -51,6 +72,7 @@ function normalizePlan(plan: WeeklyPlan): WeeklyPlan {
         servings: Number.isFinite(slot.servings) && slot.servings >= 1 ? slot.servings : 1,
         ingredient: slot.ingredient ? {
           ...slot.ingredient,
+          category: normalizeGroceryCategory(slot.ingredient.category, slot.ingredient.name),
           normalizedName: normalizeIngredientName(slot.ingredient.name),
           quantity: Number.isFinite(slot.ingredient.quantity) && slot.ingredient.quantity > 0 ? slot.ingredient.quantity : 1,
           unit: slot.ingredient.unit || 'Stück',
