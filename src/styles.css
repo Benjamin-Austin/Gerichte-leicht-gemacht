@@ -135,6 +135,26 @@ h3 { margin: 6px 0 4px; font-size: 16px; }
 }
 
 .form-fields textarea { width: 100%; min-height: 46px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px; outline: none; color: var(--ink); background: white; resize: vertical; line-height: 1.4; }
+.markdown-content { overflow-wrap: anywhere; line-height: 1.55; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4 { margin: 1.1em 0 .45em; }
+.markdown-content h1 { font-size: 28px; }
+.markdown-content h2 { font-size: 24px; }
+.markdown-content h3 { font-size: 19px; }
+.markdown-content p { margin: 0 0 .9em; }
+.markdown-content ul, .markdown-content ol { display: grid; gap: 7px; margin: 0 0 1em; padding-left: 23px; }
+.markdown-content blockquote { margin: 1em 0; padding: 8px 14px; border-left: 3px solid var(--orange); color: var(--muted); background: #faf7f1; }
+.markdown-content pre { max-width: 100%; overflow-x: auto; padding: 10px; border-radius: 9px; background: #f1eee8; }
+.markdown-content table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.markdown-content th, .markdown-content td { padding: 6px 9px; border: 1px solid var(--line); text-align: left; }
+.markdown-content a { color: var(--green); font-weight: 700; }
+.preparation-detail-image { display: block; width: min(100%, 420px); max-height: 300px; margin: 12px 0; border-radius: 12px; object-fit: contain; background: #eee9df; }
+.custom-ingredient-panel { display: grid; gap: 10px; padding-top: 4px; }
+.preparation-image-list { display: grid; gap: 8px; margin-top: 10px; }
+.preparation-image-item { display: grid; grid-template-columns: 64px minmax(70px, 1fr) 40px; gap: 8px; align-items: center; }
+.preparation-image-item img { width: 64px; height: 52px; border-radius: 8px; object-fit: cover; }
+.preparation-image-item label { display: grid; gap: 4px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.preparation-image-item input { min-height: 38px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; }
 .form-fields-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .ingredient-category strong { color: var(--green); font-size: 13px; }
 @media (max-width: 420px) { .form-fields-two { grid-template-columns: 1fr; } }
+.meal-title-button { width: fit-content; padding: 0; border: 0; color: var(--ink); background: transparent; font-weight: 700; text-align: left; }

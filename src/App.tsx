@@ -16,10 +16,14 @@ import {
   createIngredient,
   formatQuantity,
   normalizeIngredientName,
+  saveCustomCatalogItem,
   searchCatalog,
 } from "./lib/ingredients";
 import { generateShoppingList, groupByCategory } from "./lib/shopping-list";
+import { MarkdownContent } from "./lib/markdown";
 import { storage } from "./lib/storage";
+import { getSafeHttpUrl } from "./lib/urls";
+import { validateImageFile } from "./lib/uploads";
 import {
   GROCERY_CATEGORIES,
   MEAL_TYPES,
@@ -55,7 +59,7 @@ export default function App() {
   const [recipeEditor, setRecipeEditor] = useState<Recipe | null>(null);
   const [pickerMeal, setPickerMeal] = useState<MealType | null>(null);
   const [foodPickerMeal, setFoodPickerMeal] = useState<MealType | null>(null);
-  const [recipeDetail, setRecipeDetail] = useState<Recipe | null>(null);
+  const [recipeDetail, setRecipeDetail] = useState<{ recipe: Recipe; origin: "planner" | "recipes" } | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
@@ -205,6 +209,7 @@ export default function App() {
             onAdd={setPickerMeal}
             onAddFood={setFoodPickerMeal}
             onPreview={(imageUrl) => setImagePreview(imageUrl)}
+            onSelect={(recipe) => setRecipeDetail({ recipe, origin: "planner" })}
             onUpdateSlot={updateSlot}
             onUpdateFood={(id, changes) =>
               setPlan((current) => ({
@@ -239,7 +244,7 @@ export default function App() {
             onSearch={setSearch}
             onAdd={() => setRecipeEditor(createRecipe())}
             onEdit={setRecipeEditor}
-            onSelect={setRecipeDetail}
+            onSelect={(recipe) => setRecipeDetail({ recipe, origin: "recipes" })}
             onPreview={(imageUrl) => setImagePreview(imageUrl)}
             selectedIds={plan.mealSlots.flatMap((slot) =>
               slot.recipeId ? [slot.recipeId] : [],
@@ -310,16 +315,17 @@ export default function App() {
       )}
       {recipeDetail && (
         <RecipeDetail
-          recipe={recipeDetail}
+          recipe={recipeDetail.recipe}
+          origin={recipeDetail.origin}
           onClose={() => setRecipeDetail(null)}
           onEdit={() => {
-            setRecipeEditor(recipeDetail);
+            setRecipeEditor(recipeDetail.recipe);
             setRecipeDetail(null);
           }}
           onAddToPlanner={() => {
             setPlan((current) =>
               current.mealSlots.some(
-                (slot) => slot.recipeId === recipeDetail.id,
+                (slot) => slot.recipeId === recipeDetail.recipe.id,
               )
                 ? current
                 : {
@@ -327,7 +333,7 @@ export default function App() {
                       ...current.mealSlots,
                       {
                         id: newId("slot"),
-                        recipeId: recipeDetail.id,
+                        recipeId: recipeDetail.recipe.id,
                         mealType: "Mittagessen",
                         servings: 1,
                       },
@@ -400,6 +406,7 @@ function Planner({
   slots,
   onAdd,
   onAddFood,
+  onSelect,
   onPreview,
   onUpdateSlot,
   onUpdateFood,
@@ -409,6 +416,7 @@ function Planner({
   slots: { slot: WeeklyPlan["mealSlots"][number]; recipe?: Recipe }[];
   onAdd: (meal: MealType) => void;
   onAddFood: (meal: MealType) => void;
+  onSelect: (recipe: Recipe) => void;
   onPreview: (imageUrl: string) => void;
   onUpdateSlot: (id: string, servings: number) => void;
   onUpdateFood: (id: string, changes: Partial<Ingredient>) => void;
@@ -496,10 +504,13 @@ function Planner({
                     <RecipeThumb
                       recipe={recipe}
                       color={categoryColors[index % categoryColors.length]}
+                      onSelect={() => onSelect(recipe)}
                       onPreview={() => recipe.imageUrl && onPreview(recipe.imageUrl)}
                     />
                     <div className="meal-copy">
-                      <strong>{recipe.name}</strong>
+                      <button className="meal-title-button" onClick={() => onSelect(recipe)}>
+                        {recipe.name}
+                      </button>
                       <span>
                         {recipe.category} · {recipe.ingredients.length} Zutaten
                       </span>
@@ -661,7 +672,7 @@ function RecipeCard({
     <article className={`recipe-card ${selected ? "selected" : ""}`}>
       <button
         className="recipe-visual"
-        style={{ background: color }}
+        style={recipe.imageUrl ? undefined : { background: color }}
         onClick={onSelect}
       >
         {recipe.imageUrl ? (
@@ -695,14 +706,10 @@ function RecipeCard({
     </article>
   );
 }
-function RecipeThumb({ recipe, color, onPreview }: { recipe: Recipe; color: string; onPreview: () => void }) {
+function RecipeThumb({ recipe, color, onSelect, onPreview }: { recipe: Recipe; color: string; onSelect: () => void; onPreview: () => void }) {
   return (
-    <button className="meal-icon" style={{ background: color }} onClick={(event) => { event.stopPropagation(); onPreview(); }} aria-label={`${recipe.name} Bild vergrößern`} disabled={!recipe.imageUrl}>
-      {recipe.imageUrl ? (
-        <img src={recipe.imageUrl} alt="" />
-      ) : (
-        recipe.name.slice(0, 1)
-      )}
+    <button className="meal-icon" style={recipe.imageUrl ? undefined : { background: color }} onClick={onSelect} aria-label={`${recipe.name} öffnen`}>
+      {recipe.imageUrl ? <img src={recipe.imageUrl} alt="" /> : recipe.name.slice(0, 1)}
     </button>
   );
 }
@@ -862,9 +869,7 @@ function RecipePicker({
             >
               <div
                 className="picker-image"
-                style={{
-                  background: categoryColors[index % categoryColors.length],
-                }}
+                style={recipe.imageUrl ? undefined : { background: categoryColors[index % categoryColors.length] }}
               >
                 {recipe.imageUrl ? (
                   <img src={recipe.imageUrl} alt="" />
@@ -1018,6 +1023,13 @@ function RecipeForm({
   const [error, setError] = useState("");
   const [ingredientQuery, setIngredientQuery] = useState("");
   const [ingredientSearchOpen, setIngredientSearchOpen] = useState(false);
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>(
+    () => Object.fromEntries(recipe.ingredients.map((item) => [item.id, String(item.quantity)])),
+  );
+  const [customIngredientOpen, setCustomIngredientOpen] = useState(false);
+  const [customIngredientName, setCustomIngredientName] = useState("");
+  const [customIngredientCategory, setCustomIngredientCategory] = useState<GroceryCategory>("Sonstiges");
+  const [preparationImageStep, setPreparationImageStep] = useState(0);
   function updateIngredient(id: string, changes: Partial<Ingredient>) {
     setDraft((current) => ({
       ...current,
@@ -1035,11 +1047,28 @@ function RecipeForm({
     }));
   }
   function addIngredient(name: string) {
+    const ingredient = createIngredient(name);
     setDraft((current) => ({
       ...current,
-      ingredients: [createIngredient(name), ...current.ingredients],
+      ingredients: [ingredient, ...current.ingredients],
     }));
+    setQuantityDrafts((current) => ({ ...current, [ingredient.id]: String(ingredient.quantity) }));
     setIngredientQuery("");
+    setIngredientSearchOpen(false);
+  }
+  function addCustomIngredient() {
+    const name = customIngredientName.trim() || ingredientQuery.trim();
+    if (!name) return setError("Bitte gib einen Namen für die eigene Zutat ein.");
+    const catalogItem = saveCustomCatalogItem(name, customIngredientCategory);
+    const ingredient = {
+      ...createIngredient(catalogItem.name, 1, catalogItem.defaultUnit),
+      category: catalogItem.shoppingCategory,
+    };
+    setDraft((current) => ({ ...current, ingredients: [ingredient, ...current.ingredients] }));
+    setQuantityDrafts((current) => ({ ...current, [ingredient.id]: String(ingredient.quantity) }));
+    setIngredientQuery("");
+    setCustomIngredientName("");
+    setCustomIngredientOpen(false);
     setIngredientSearchOpen(false);
   }
   function save() {
@@ -1047,11 +1076,17 @@ function RecipeForm({
       return setError("Bitte gib dem Rezept einen Namen.");
     if (!draft.category)
       return setError("Bitte wähle zuerst eine Kategorie aus.");
+    if (draft.videoUrl?.trim() && !getSafeHttpUrl(draft.videoUrl))
+      return setError("Der Videolink muss mit http:// oder https:// beginnen.");
     if (!Number.isFinite(draft.servings) || (draft.servings ?? 0) < 1)
       return setError("Portionen müssen mindestens 1 sein.");
+    const parsedIngredients = draft.ingredients.map((item) => ({
+      ...item,
+      quantity: Number.parseFloat(quantityDrafts[item.id] ?? String(item.quantity)),
+    }));
     if (
-      draft.ingredients.length === 0 ||
-      draft.ingredients.some(
+      parsedIngredients.length === 0 ||
+      parsedIngredients.some(
         (item) =>
           !item.name.trim() ||
           !Number.isFinite(item.quantity) ||
@@ -1059,12 +1094,12 @@ function RecipeForm({
           !item.unit,
       )
     )
-      return setError("Bitte fülle alle Zutaten vollständig aus.");
+      return setError("Bitte gib für jede Zutat eine gültige Menge grösser als 0 ein.");
     onSave({
       ...draft,
       name: draft.name.trim(),
       servings: Math.floor(draft.servings ?? 1),
-      ingredients: draft.ingredients.map((item) => ({
+      ingredients: parsedIngredients.map((item) => ({
         ...item,
         name: item.name.trim(),
         normalizedName: normalizeIngredientName(item.name),
@@ -1072,29 +1107,22 @@ function RecipeForm({
     });
   }
   function uploadImage(file: File) {
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
-    if (!allowedTypes.includes(file.type))
-      return setError("Bitte wähle ein JPG-, PNG- oder WebP-Bild aus.");
-    if (file.size > 2_000_000)
-      return setError("Das Bild darf höchstens 2 MB gross sein.");
-    const reader = new FileReader();
-    reader.onerror = () => setError("Das Bild konnte nicht gelesen werden.");
-    reader.onload = () => {
-      const image = new Image();
-      image.onerror = () => setError("Die Bilddatei ist ungültig.");
-      image.onload = () => {
-        if (image.width > 4096 || image.height > 4096)
-          return setError(
-            "Das Bild darf höchstens 4096 Pixel breit oder hoch sein.",
-          );
-        setDraft((current) => ({
-          ...current,
-          imageUrl: String(reader.result),
-        }));
-      };
-      image.src = String(reader.result);
-    };
-    reader.readAsDataURL(file);
+    validateImageFile(file)
+      .then(({ dataUrl }) => setDraft((current) => ({ ...current, imageUrl: dataUrl })))
+      .catch((uploadError: Error) => setError(uploadError.message));
+  }
+  function uploadPreparationImage(file: File) {
+    if ((draft.preparationImages?.length ?? 0) >= 8)
+      return setError("Pro Rezept sind höchstens 8 Zubereitungsbilder möglich.");
+    validateImageFile(file)
+      .then(({ dataUrl }) => setDraft((current) => ({
+        ...current,
+        preparationImages: [
+          ...(current.preparationImages ?? []),
+          { id: newId("preparation-image"), dataUrl, step: preparationImageStep },
+        ],
+      })))
+      .catch((uploadError: Error) => setError(uploadError.message));
   }
   const suggestions = searchCatalog(ingredientQuery).map((item) => item.name);
   return (
@@ -1197,21 +1225,59 @@ function RecipeForm({
               }
             />
           </label>
+          <div className="image-upload">
+            <label>
+              Bilder zu Zubereitungsschritten
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={preparationImageStep}
+                onChange={(event) => setPreparationImageStep(Math.max(0, Number(event.target.value) || 0))}
+                placeholder="Zeile, nach der das Bild erscheint"
+              />
+            </label>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(event) => event.target.files?.[0] && uploadPreparationImage(event.target.files[0])}
+            />
+            <div className="preparation-image-list">
+              {(draft.preparationImages ?? []).map((image) => (
+                <div className="preparation-image-item" key={image.id}>
+                  <img src={image.dataUrl} alt="" />
+                  <label>
+                    Position
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={image.step}
+                      onChange={(event) => setDraft((current) => ({
+                        ...current,
+                        preparationImages: (current.preparationImages ?? []).map((item) => item.id === image.id ? { ...item, step: Math.max(0, Number(event.target.value) || 0) } : item),
+                      }))}
+                    />
+                  </label>
+                  <button className="delete-button" aria-label="Zubereitungsbild entfernen" onClick={() => setDraft((current) => ({ ...current, preparationImages: (current.preparationImages ?? []).filter((item) => item.id !== image.id) }))}>
+                    <Trash2 size={17} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
           <label>
             Zubereitungsschritte
             <textarea
-              rows={4}
-              value={(draft.preparation ?? []).join("\n")}
+              rows={8}
+              value={draft.preparation ?? ""}
               onChange={(event) =>
                 setDraft({
                   ...draft,
-                  preparation: event.target.value
-                    .split("\n")
-                    .map((step) => step.trim())
-                    .filter(Boolean),
+                  preparation: event.target.value,
                 })
               }
-              placeholder="Jeden Schritt in eine neue Zeile schreiben"
+              placeholder="Schritte, Absätze oder Bullet Points eingeben"
             />
           </label>
           <div className="form-fields-two">
@@ -1287,6 +1353,34 @@ function RecipeForm({
                   </button>
                 ))}
               </div>
+              {ingredientQuery.trim() && suggestions.length === 0 && (
+                <div className="custom-ingredient-panel">
+                  <p className="form-error">Keine passende Zutat gefunden.</p>
+                  {!customIngredientOpen ? (
+                    <button className="secondary-button" onClick={() => setCustomIngredientOpen(true)}>
+                      <Plus size={17} /> Eigene Zutat hinzufügen
+                    </button>
+                  ) : (
+                    <div className="form-fields-two">
+                      <label>
+                        Name
+                        <input
+                          value={customIngredientName}
+                          onChange={(event) => setCustomIngredientName(event.target.value)}
+                          placeholder={ingredientQuery}
+                        />
+                      </label>
+                      <label>
+                        Einkaufskategorie
+                        <select value={customIngredientCategory} onChange={(event) => setCustomIngredientCategory(event.target.value as GroceryCategory)}>
+                          {GROCERY_CATEGORIES.map((category) => <option key={category}>{category}</option>)}
+                        </select>
+                      </label>
+                      <button className="primary-button" onClick={addCustomIngredient}>Zutat übernehmen</button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {draft.ingredients.map((item) => (
@@ -1303,12 +1397,17 @@ function RecipeForm({
                     type="number"
                     min="0.1"
                     step="0.1"
-                    value={item.quantity}
-                    onChange={(event) =>
-                      updateIngredient(item.id, {
-                        quantity: Number(event.target.value),
-                      })
-                    }
+                    value={quantityDrafts[item.id] ?? String(item.quantity)}
+                    onFocus={(event) => event.currentTarget.select()}
+                    onChange={(event) => setQuantityDrafts((current) => ({ ...current, [item.id]: event.target.value }))}
+                    onBlur={() => {
+                      const value = Number.parseFloat(quantityDrafts[item.id] ?? "");
+                      if (!Number.isFinite(value) || value <= 0) setError("Die Menge muss grösser als 0 sein.");
+                      else {
+                        updateIngredient(item.id, { quantity: value });
+                        setError("");
+                      }
+                    }}
                   />
                 </label>
                 <label>
@@ -1359,15 +1458,18 @@ function RecipeForm({
 }
 function RecipeDetail({
   recipe,
+  origin,
   onClose,
   onEdit,
   onAddToPlanner,
 }: {
   recipe: Recipe;
+  origin: "planner" | "recipes";
   onClose: () => void;
   onEdit: () => void;
   onAddToPlanner: () => void;
 }) {
+  const safeVideoUrl = getSafeHttpUrl(recipe.videoUrl);
   return (
     <div className="modal-backdrop recipe-detail-backdrop">
       <article className="modal-sheet recipe-detail">
@@ -1379,7 +1481,7 @@ function RecipeDetail({
           <button
             className="icon-button"
             onClick={onClose}
-            aria-label="Schließen"
+            aria-label={origin === "planner" ? "Zurück zum Planer" : "Zurück zu den Rezepten"}
           >
             <X size={21} />
           </button>
@@ -1409,14 +1511,13 @@ function RecipeDetail({
             ))}
           </ul>
         </section>
-        {recipe.preparation && recipe.preparation.length > 0 && (
+        {(recipe.preparation?.trim() || recipe.preparationImages?.length) && (
           <section>
             <h3>Zubereitung</h3>
-            <ol>
-              {recipe.preparation.map((step, index) => (
-                <li key={`${step}-${index}`}>{step}</li>
-              ))}
-            </ol>
+            <MarkdownContent content={recipe.preparation ?? ""} />
+            {recipe.preparationImages?.map((image) => (
+              <img className="preparation-detail-image" key={image.id} src={image.dataUrl} alt={`Zubereitungsbild nach Schritt ${image.step + 1}`} />
+            ))}
           </section>
         )}
         {recipe.notes && (
@@ -1425,10 +1526,10 @@ function RecipeDetail({
             <p>{recipe.notes}</p>
           </section>
         )}
-        {recipe.videoUrl && (
+        {safeVideoUrl && (
           <a
             className="secondary-button full-width"
-            href={recipe.videoUrl}
+            href={safeVideoUrl}
             target="_blank"
             rel="noreferrer"
           >

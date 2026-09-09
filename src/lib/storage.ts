@@ -42,7 +42,18 @@ function normalizeRecipe(recipe: Recipe): Recipe {
     ...recipe,
     category,
     servings: Number.isFinite(recipe.servings) && (recipe.servings ?? 0) >= 1 ? recipe.servings : 4,
-    preparation: Array.isArray(recipe.preparation) ? recipe.preparation.filter(Boolean) : undefined,
+    preparation: Array.isArray(recipe.preparation)
+      ? recipe.preparation.filter(Boolean).join('\n')
+      : typeof recipe.preparation === 'string'
+        ? recipe.preparation
+        : undefined,
+    preparationImages: Array.isArray(recipe.preparationImages)
+      ? recipe.preparationImages.filter((image) => image?.dataUrl).map((image, index) => ({
+        id: image.id || `preparation-image-${index}`,
+        dataUrl: image.dataUrl,
+        step: Number.isFinite(image.step) && image.step >= 0 ? Math.floor(image.step) : 0,
+      }))
+      : undefined,
     ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients.filter((ingredient) => ingredient?.name).map((ingredient) => ({
       ...ingredient,
       normalizedName: normalizeIngredientName(ingredient.name),

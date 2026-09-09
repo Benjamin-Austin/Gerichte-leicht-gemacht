@@ -15,6 +15,7 @@ Hauptfunktionen:
 - einzelne Lebensmittel direkt in den Plan aufnehmen
 - automatische Einkaufsliste aus dem aktuellen Plan erzeugen
 - Einkaufspunkte abhaken oder aus der Ansicht entfernen
+- Markdown-formatierte Zubereitung und optionale Zubereitungsbilder
 
 ## 2. Tech Stack
 
@@ -25,6 +26,7 @@ Hauptfunktionen:
 | Build Tool | Vite | Entwicklungsserver und Produktionsbuild |
 | Styling | CSS in `src/styles.css` | Responsive, mobile-first Oberfläche |
 | UI Icons | `lucide-react` | Icons für Navigation und Aktionen |
+| Markdown | `react-markdown`, `remark-gfm`, `rehype-sanitize` | Sichere Markdown-Darstellung der Zubereitung |
 | Tests | Vitest | Tests für Zutaten- und Einkaufslogik |
 | Persistenz | Browser `localStorage` | Rezepte, Plan und Einkaufsliste |
 | Hosting-Konfiguration | Vercel-Konfiguration | Security-Header für statische Auslieferung |
@@ -51,6 +53,8 @@ Die Anwendung läuft vollständig clientseitig. Es gibt keine Server-Komponenten
 
 `App.tsx` hält den zentralen Anwendungszustand. Änderungen an Rezepten und Plan werden über `storage.ts` in `localStorage` geschrieben. Die Einkaufsliste wird aus Rezepten und Planer-Einträgen berechnet und anschließend ebenfalls lokal gespeichert.
 
+Markdown bleibt als Text im Rezept gespeichert und wird erst beim Anzeigen im Frontend gerendert und sanitisiert. Es wird kein fertiges HTML in `localStorage` abgelegt.
+
 Daten sind an Browser und Gerät gebunden. Ein Deployment auf Vercel veröffentlicht die Anwendung, synchronisiert aber keine lokalen Rezepte zwischen iPhone und PC.
 
 ## 4. Projektstruktur
@@ -73,6 +77,10 @@ Daten sind an Browser und Gerät gebunden. Ein Deployment auf Vercel veröffentl
 │   └── lib/
 │       ├── ingredients.ts
 │       ├── ingredients.test.ts
+│       ├── markdown.tsx
+│       ├── markdown.test.tsx
+│       ├── urls.ts
+│       ├── uploads.ts
 │       ├── shopping-list.ts
 │       └── storage.ts
 └── dist/ / node_modules/
@@ -84,6 +92,9 @@ Wichtige Dateien:
 - `src/types.ts` → Domänentypen, Kategorien, Einheiten und Mahlzeittypen
 - `src/lib/storage.ts` → `localStorage`-Adapter, Normalisierung und Migration älterer Daten
 - `src/lib/ingredients.ts` → Zutaten-Normalisierung, Formatierung, Rundung und Zusammenführung
+- `src/lib/markdown.tsx` → sichere Markdown-Darstellung für Benutzereingaben; HTML und eingebettete Bilder werden nicht als aktive Inhalte zugelassen
+- `src/lib/urls.ts` → erlaubt nur `http`- und `https`-URLs
+- `src/lib/uploads.ts` → gemeinsame MIME-, Größen- und Bilddekodierungsprüfung
 - `src/lib/shopping-list.ts` → Erzeugung und Gruppierung der Einkaufsliste
 - `src/data/seedRecipes.ts` → initiale Beispielrezepte
 - `src/lib/ingredients.test.ts` → Tests für Zutaten- und Einkaufslogik
@@ -119,13 +130,15 @@ Der Rezepteditor wird als Modal dargestellt.
 - Zutatenmenge
 - Einheit
 - Einkaufskategorie
+- Zubereitungsschritte als Markdown-Text
+- optionale Bilder zu Zubereitungsschritten
 - einzelne Zutaten entfernen
 - Rezept speichern
 - vorhandenes Rezept löschen
 
-Zutaten werden aus einer Liste häufiger Zutaten ausgewählt. Freie Texteingabe für neue Zutaten ist im aktuellen Editor nicht vorgesehen; die Vorschläge stammen aus `commonIngredients` in `App.tsx`.
+Zutaten werden aus dem zentralen Katalog ausgewählt. Eigene Zutaten können im Rezepteditor angelegt, kategorisiert und lokal im Browser wiederverwendet werden.
 
-Die Bildauswahl akzeptiert JPEG, PNG und WebP. Die Datei darf höchstens 2 MB groß sein, maximal 4096 Pixel breit oder hoch sein und muss erfolgreich als Bild dekodiert werden. Das Bild wird anschließend als Data-URL im Rezept gespeichert.
+Die Bildauswahl akzeptiert JPEG, PNG und WebP. Rezept- und Zubereitungsbilder werden als lokale Data-URLs gespeichert. Zubereitungsbilder können mehreren Textpositionen zugeordnet, verschoben und gelöscht werden.
 
 ### Planer
 
@@ -186,6 +199,8 @@ Die Typen stammen aus `src/types.ts`.
 | `category` | `string` | Rezeptkategorie; beim Laden auf aktuelle Kategorien normalisiert |
 | `servings` | `number \| undefined` | ursprüngliche Rezeptportionen; Standardwert 4 |
 | `imageUrl` | `string \| undefined` | lokale Bild-Data-URL |
+| `preparation` | `string \| undefined` | formatierter Zubereitungstext mit erhaltenen Zeilenumbrüchen |
+| `preparationImages` | `PreparationImage[] \| undefined` | optionale Bilder mit Schrittposition |
 | `ingredients` | `Ingredient[]` | Zutaten des Rezepts |
 
 ### `PlannedRecipe`
@@ -282,9 +297,12 @@ Sie werden ohne Portionsskalierung in die Einkaufsliste übernommen und anschlie
 sonntagskueche:recipes:v1
 sonntagskueche:plan:v1
 sonntagskueche:shopping:v1
+sonntagskueche:ingredient-catalog:v1
 ```
 
 Beim Laden werden gespeicherte Daten defensiv normalisiert. Ältere Rezeptkategorien wie `Familienliebling`, `Würzig`, `Schnell`, `Pasta`, `Frisch`, `Wochenende` und `One-Pot` werden auf aktuelle Kategorien abgebildet. Ältere Pläne mit `selectedRecipeIds` werden in `mealSlots` umgewandelt.
+
+Ältere Zubereitungs-Arrays werden beim Laden mit Zeilenumbrüchen in den aktuellen Markdown-Text migriert. Eigene Zutaten werden separat im lokalen Katalog gespeichert und bei der Suche mit dem Standardkatalog zusammengeführt.
 
 ## 8. UI / UX Entscheidungen
 
@@ -325,6 +343,18 @@ Tests:
 npm test
 ```
 
+Aktueller Teststand: 2 Testdateien mit insgesamt 17 bestandenen Tests. Ein `lint`-Script ist derzeit nicht eingerichtet; `npm run lint` kann deshalb nicht ausgeführt werden.
+
+Security- und Installationschecks vor dem Deployment:
+
+```bash
+npm audit --audit-level=moderate
+npm ci --dry-run
+git diff --check
+```
+
+Der aktuelle Audit meldet 0 Schwachstellen. `npm ci --dry-run` ist erfolgreich und bestätigt, dass `package.json` und `package-lock.json` synchron sind.
+
 Vercel:
 
 - Das Projekt ist für statisches Vite-Hosting geeignet.
@@ -333,7 +363,19 @@ Vercel:
 - GitHub-Verbindung oder ein konkretes bestehendes Vercel-Projekt sind im Repository nicht dokumentiert.
 - `dist/` und `node_modules/` sind laut `.gitignore` ausgeschlossen.
 
-Die veröffentlichten Frontend-Dateien enthalten nur die App und Seed-Rezepte. Benutzerinhalte aus `localStorage` werden nicht an Vercel übertragen und nicht durch Vercel geteilt.
+Die veröffentlichten Frontend-Dateien enthalten nur die App und Seed-Rezepte. Benutzerinhalte aus `localStorage` werden nicht an Vercel übertragen und nicht durch Vercel geteilt. Markdown wird im Frontend mit `react-markdown`, `remark-gfm` und `rehype-sanitize` verarbeitet; `rehype-raw` wird nicht verwendet.
+
+### Vercel-Checkliste
+
+1. Framework-Preset: Vite.
+2. Build command: `npm run build`.
+3. Output directory: `dist`.
+4. Keine Environment Variables sind aktuell erforderlich.
+5. Falls später Variablen ergänzt werden: echte Geheimnisse niemals mit `VITE_` oder `NEXT_PUBLIC_` prefixen. Solche Frontend-Variablen werden in das öffentliche JavaScript eingebaut.
+6. Preview Deployments enthalten dieselbe öffentliche App. Keine vertraulichen Daten in Seed-Dateien, `localStorage`-Defaults oder Frontend-Variablen ablegen.
+7. HTTPS, Custom Domain und die Header aus `vercel.json` vor dem ersten Production-Deployment prüfen.
+
+Es gibt aktuell keine öffentlich erreichbaren Funktionen, für die serverseitiges Rate Limiting, Authorization, CSRF-Schutz, RLS oder Datenbank-Credentials erforderlich wären. Diese Aussage gilt nicht automatisch nach einer späteren Einführung von Login, Cloud-Synchronisation oder externen APIs.
 
 ## 10. Sicherheit
 
@@ -344,10 +386,25 @@ Die veröffentlichten Frontend-Dateien enthalten nur die App und Seed-Rezepte. B
 - Keine RLS-Regeln oder Storage-Buckets
 - Keine verwendeten Environment Variables
 - Keine `VITE_`-Secrets oder Service-Role-Keys im Frontend
-- React rendert Benutzereingaben als Text; im Anwendungscode wird kein `dangerouslySetInnerHTML` verwendet
+- Markdown wird über `react-markdown` und `rehype-sanitize` gerendert; HTML, Skripte, Eventattribute und eingebettete Bilder werden nicht als aktive Inhalte zugelassen
+- Markdown- und Videolinks werden auf `http:` und `https:` begrenzt
 - Rezeptbilder werden ausschließlich lokal als Data-URL gespeichert
 - Upload-Limits: JPEG/PNG/WebP, maximal 2 MB, maximal 4096 Pixel je Dimension, erfolgreiche Bilddekodierung erforderlich
 - Vercel-Header: CSP, `Permissions-Policy`, `Referrer-Policy`, `X-Content-Type-Options`, `X-Frame-Options`
+
+### Sicherheitsbericht vor Deployment
+
+| Status | Problem | Risiko | Lösung | Status |
+|---|---|---|---|---|
+| 🟢 | Keine API, Datenbank, Authentifizierung oder Benutzerkonten | Keine serverseitige Angriffsfläche in diesem Projekt | Keine zusätzliche Maßnahme für die aktuelle Architektur | Geprüft |
+| 🟢 | Keine gefundenen Secrets oder Environment-Variablen im Frontend | Keine aktuell sichtbaren Zugangsdaten | `.env`-Dateien sind ignoriert; Git- und Textsuche geprüft | Geprüft |
+| 🟢 | Markdown kann Benutzereingaben enthalten | Unsanitisiertes HTML könnte XSS auslösen | Sanitization, `skipHtml`, restriktive Link-/Bildregeln und Regressionstests | Behoben |
+| 🟡 | Speicherung in `localStorage` | Daten sind nicht vertraulich, nicht synchronisiert und durch den Benutzer manipulierbar | Nur für persönliche lokale Nutzung; keine Geheimnisse speichern | Bewusste Einschränkung |
+| 🟡 | Bilder als Data-URLs | Hoher Speicherverbrauch und begrenzte Skalierung | Gemeinsame Größen-/Dekodierungsprüfung und maximal 8 Zubereitungsbilder | Gehärtet |
+| 🟡 | Keine serverseitige Rate-Limit-/Authorization-Schicht | Bei späterem Backend wären Frontend-Prüfungen nicht ausreichend | Vor Cloud-/Login-Funktionen serverseitige Zugriffskontrollen einführen | Nicht relevant im aktuellen Scope |
+| 🟡 | Kein Lint-Script | Stil- und bestimmte statische Fehler werden nicht durch einen eigenen Lint-Schritt geprüft | Vor größerem Ausbau ESLint/TypeScript-Linting ergänzen | Offen, kein unmittelbares Security-Problem |
+
+**Kann ich die App in ihrem aktuellen Zustand öffentlich auf Vercel deployen: JA, für die aktuelle rein lokale Einzelbenutzer-App.** `npm audit`, Build, Tests, `npm ci --dry-run`, Git-Prüfung und TypeScript-Diagnostics sind erfolgreich. Die App ist nicht als Mehrbenutzer- oder vertrauliche Datenspeicherlösung freigegeben. Ein eigenes Lint-Script fehlt weiterhin.
 
 Die öffentliche URL macht die App-Oberfläche erreichbar. Sie macht die `localStorage`-Daten eines anderen Browsers nicht direkt lesbar. Ein Besucher kann jedoch den öffentlich ausgelieferten JavaScript-Code einsehen und eine eigene lokale App-Instanz verwenden.
 
@@ -387,11 +444,6 @@ Diese Entscheidungen sollten nicht ohne Prüfung der Auswirkungen auf lokale Dat
   **Auswirkung:** Nach Neuladen oder Neuberechnung können sie wieder auftauchen.
   **Status:** Aktuelles Verhalten.
   **Priorität:** niedrig
-
-- **Problem:** Im Arbeitsbaum existieren umfangreiche bestehende Löschungen unter `dist/` und `node_modules/`.
-  **Auswirkung:** Git-Status und Deployment-Review können dadurch unübersichtlich sein.
-  **Status:** Nicht durch diese Dokumentation geändert; vor Commit/Deployment separat prüfen.
-  **Priorität:** hoch für Repository-Hygiene
 
 ## 13. Offene Punkte / Roadmap
 

@@ -41,13 +41,20 @@ export type CatalogItem = {
   defaultUnit?: string
 }
 
+export type PreparationImage = {
+  id: string
+  dataUrl: string
+  step: number
+}
+
 export type Recipe = {
   id: string
   name: string
   category: string
   servings?: number
   imageUrl?: string
-  preparation?: string[]
+  preparation?: string
+  preparationImages?: PreparationImage[]
   videoUrl?: string
   preparationTime?: string
   difficulty?: string

@@ -1,6 +1,22 @@
 import { ingredientCatalog } from '../data/ingredientCatalog'
 import type { CatalogItem, GroceryCategory, Ingredient, ShoppingItem } from '../types'
 
+const customCatalogKey = 'sonntagskueche:ingredient-catalog:v1'
+
+function loadCustomCatalog(): CatalogItem[] {
+  try {
+    const raw = localStorage.getItem(customCatalogKey)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.filter((item): item is CatalogItem => Boolean(item?.name && item?.shoppingCategory)) : []
+  } catch {
+    return []
+  }
+}
+
+function catalogItems(): CatalogItem[] {
+  return [...ingredientCatalog, ...loadCustomCatalog()]
+}
+
 const pluralAliases: Record<string, string> = {
   äpfel: 'apfel',
   bananen: 'banane',
@@ -23,13 +39,29 @@ export function normalizeSearchText(value: string): string {
 
 export function findCatalogItem(name: string): CatalogItem | undefined {
   const normalized = normalizeSearchText(name)
-  return ingredientCatalog.find((item) => [item.name, ...(item.aliases ?? [])].some((candidate) => normalizeSearchText(candidate) === normalized))
+  return catalogItems().find((item) => [item.name, ...(item.aliases ?? [])].some((candidate) => normalizeSearchText(candidate) === normalized))
 }
 
 export function searchCatalog(query: string): CatalogItem[] {
   const normalized = normalizeSearchText(query)
   if (!normalized) return []
-  return ingredientCatalog.filter((item) => [item.name, ...(item.aliases ?? [])].some((candidate) => normalizeSearchText(candidate).includes(normalized)))
+  return catalogItems().filter((item) => [item.name, ...(item.aliases ?? [])].some((candidate) => normalizeSearchText(candidate).includes(normalized)))
+}
+
+export function saveCustomCatalogItem(name: string, shoppingCategory: GroceryCategory, defaultUnit = 'Stück'): CatalogItem {
+  const item: CatalogItem = {
+    id: `custom-${normalizeIngredientName(name)}-${Date.now()}`,
+    name: name.trim(),
+    shoppingCategory,
+    type: 'food',
+    defaultUnit,
+  }
+  try {
+    localStorage.setItem(customCatalogKey, JSON.stringify([...loadCustomCatalog(), item]))
+  } catch {
+    // The ingredient remains usable in the current recipe if storage is unavailable.
+  }
+  return item
 }
 
 export function inferShoppingCategory(name: string, fallback: GroceryCategory = 'Sonstiges'): GroceryCategory {
