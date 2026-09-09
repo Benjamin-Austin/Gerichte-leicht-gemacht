@@ -43,7 +43,8 @@ export type CatalogItem = {
 
 export type PreparationImage = {
   id: string
-  dataUrl: string
+  storagePath: string
+  imageUrl?: string
   step: number
 }
 
@@ -52,6 +53,7 @@ export type Recipe = {
   name: string
   category: string
   servings?: number
+  imagePath?: string
   imageUrl?: string
   preparation?: string
   preparationImages?: PreparationImage[]
@@ -83,6 +85,7 @@ export type ShoppingItem = {
   unit: string
   category: GroceryCategory
   checked: boolean
+  hidden?: boolean
 }
 
 export type Tab = 'planner' | 'recipes' | 'shopping'

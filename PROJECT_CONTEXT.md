@@ -4,7 +4,7 @@
 
 **Sonntagsküche** ist eine persönliche Rezept-, Mahlzeitenplan- und Einkaufsliste-App. Sie richtet sich aktuell an eine einzelne Person, die Rezepte verwalten, Mahlzeiten planen und daraus eine Einkaufsliste ableiten möchte.
 
-Die App befindet sich in einem funktionsfähigen clientseitigen Entwicklungsstand. Sie enthält keine Benutzerkonten, keine Cloud-Synchronisation und kein Backend. Rezepte, Planer und Einkaufsliste bleiben im jeweiligen Browser gespeichert.
+Die App arbeitet clientseitig mit Supabase Authentication, PostgreSQL und privaten Storage-Buckets. Rezepte, Planer und Einkaufsliste werden benutzerbezogen synchronisiert.
 
 Hauptfunktionen:
 
@@ -28,10 +28,10 @@ Hauptfunktionen:
 | UI Icons | `lucide-react` | Icons für Navigation und Aktionen |
 | Markdown | `react-markdown`, `remark-gfm`, `rehype-sanitize` | Sichere Markdown-Darstellung der Zubereitung |
 | Tests | Vitest | Tests für Zutaten- und Einkaufslogik |
-| Persistenz | Browser `localStorage` | Rezepte, Plan und Einkaufsliste |
+| Persistenz | Supabase PostgreSQL und Storage | Rezepte, Plan, Einkaufsliste und private Bilder |
 | Hosting-Konfiguration | Vercel-Konfiguration | Security-Header für statische Auslieferung |
-| Datenbank | Keine | Aktuell nicht vorhanden |
-| Authentication | Keine | Aktuell nicht vorhanden |
+| Datenbank | Supabase PostgreSQL | `recipes`, `ingredients`, `preparation_images`, `plan_slots`, `shopping_items` |
+| Authentication | Supabase Auth | Email-/Passwort-Login |
 
 Zusätzlich werden Google Fonts (`DM Sans` und `Fraunces`) in `src/styles.css` eingebunden.
 
@@ -44,18 +44,18 @@ React-App (`src/App.tsx`)
   ├── Rezepte, Planer und Einkauf als Tabs
   ├── lokale State-Verwaltung mit React Hooks
   ├── Zutaten-/Einkaufslogik aus `src/lib/`
-  └── `src/lib/storage.ts`
-        ↓
-Browser-localStorage
+  ├── `src/lib/storage.ts`
+  ├── `src/lib/supabase.ts`
+  └── Supabase Auth / PostgreSQL / private Storage-Buckets
 ```
 
-Die Anwendung läuft vollständig clientseitig. Es gibt keine Server-Komponenten, keine API-Routen, keine Datenbank und keine Authentifizierung.
+Die Anwendung läuft clientseitig und verwendet Supabase als Backend. Der Browser greift mit der öffentlichen Supabase-Konfiguration und RLS-geschützten Tabellen auf die eigenen Daten zu.
 
-`App.tsx` hält den zentralen Anwendungszustand. Änderungen an Rezepten und Plan werden über `storage.ts` in `localStorage` geschrieben. Die Einkaufsliste wird aus Rezepten und Planer-Einträgen berechnet und anschließend ebenfalls lokal gespeichert.
+`App.tsx` hält den zentralen Anwendungszustand. Änderungen an Rezepten und Plan werden asynchron über `storage.ts` in Supabase gespeichert. Die Einkaufsliste wird weiterhin aus Rezepten und Planer-Einträgen berechnet; Status und ausgeblendete Positionen werden in `shopping_items` gespeichert.
 
-Markdown bleibt als Text im Rezept gespeichert und wird erst beim Anzeigen im Frontend gerendert und sanitisiert. Es wird kein fertiges HTML in `localStorage` abgelegt.
+Markdown bleibt als Text im Rezept gespeichert und wird erst beim Anzeigen im Frontend gerendert und sanitisiert. Private Bilder werden als Storage-Pfade gespeichert und für die Anzeige in kurzlebige signierte URLs umgewandelt.
 
-Daten sind an Browser und Gerät gebunden. Ein Deployment auf Vercel veröffentlicht die Anwendung, synchronisiert aber keine lokalen Rezepte zwischen iPhone und PC.
+Daten sind an den eingeloggten Supabase-Benutzer gebunden und können auf mehreren Geräten verwendet werden.
 
 ## 4. Projektstruktur
 
@@ -73,7 +73,6 @@ Daten sind an Browser und Gerät gebunden. Ein Deployment auf Vercel veröffentl
 │   ├── styles.css
 │   ├── types.ts
 │   ├── data/
-│   │   └── seedRecipes.ts
 │   └── lib/
 │       ├── ingredients.ts
 │       ├── ingredients.test.ts
@@ -90,13 +89,12 @@ Wichtige Dateien:
 
 - `src/App.tsx` → zentrale UI, Tabs, React-State, Benutzeraktionen und lokale Validierung
 - `src/types.ts` → Domänentypen, Kategorien, Einheiten und Mahlzeittypen
-- `src/lib/storage.ts` → `localStorage`-Adapter, Normalisierung und Migration älterer Daten
+- `src/lib/storage.ts` → Supabase-Adapter, relationale Mappings, signierte Bild-URLs und Normalisierung
 - `src/lib/ingredients.ts` → Zutaten-Normalisierung, Formatierung, Rundung und Zusammenführung
 - `src/lib/markdown.tsx` → sichere Markdown-Darstellung für Benutzereingaben; HTML und eingebettete Bilder werden nicht als aktive Inhalte zugelassen
 - `src/lib/urls.ts` → erlaubt nur `http`- und `https`-URLs
 - `src/lib/uploads.ts` → gemeinsame MIME-, Größen- und Bilddekodierungsprüfung
 - `src/lib/shopping-list.ts` → Erzeugung und Gruppierung der Einkaufsliste
-- `src/data/seedRecipes.ts` → initiale Beispielrezepte
 - `src/lib/ingredients.test.ts` → Tests für Zutaten- und Einkaufslogik
 - `src/styles.css` → visuelle Gestaltung und responsive Regeln
 - `vercel.json` → HTTP-Sicherheitsheader für Vercel
@@ -138,7 +136,7 @@ Der Rezepteditor wird als Modal dargestellt.
 
 Zutaten werden aus dem zentralen Katalog ausgewählt. Eigene Zutaten können im Rezepteditor angelegt, kategorisiert und lokal im Browser wiederverwendet werden.
 
-Die Bildauswahl akzeptiert JPEG, PNG und WebP. Rezept- und Zubereitungsbilder werden als lokale Data-URLs gespeichert. Zubereitungsbilder können mehreren Textpositionen zugeordnet, verschoben und gelöscht werden.
+Die Bildauswahl akzeptiert JPEG, PNG und WebP. Rezept- und Zubereitungsbilder werden in privaten Supabase-Buckets gespeichert; im Rezept bleiben Storage-Pfade, für die Anzeige signierte URLs. Zubereitungsbilder können mehreren Textpositionen zugeordnet, verschoben und gelöscht werden.
 
 ### Planer
 
@@ -198,7 +196,8 @@ Die Typen stammen aus `src/types.ts`.
 | `name` | `string` | Rezeptname |
 | `category` | `string` | Rezeptkategorie; beim Laden auf aktuelle Kategorien normalisiert |
 | `servings` | `number \| undefined` | ursprüngliche Rezeptportionen; Standardwert 4 |
-| `imageUrl` | `string \| undefined` | lokale Bild-Data-URL |
+| `imagePath` | `string \| undefined` | persistenter Pfad im privaten Cover-Bucket |
+| `imageUrl` | `string \| undefined` | kurzlebige signierte Anzeige-URL |
 | `preparation` | `string \| undefined` | formatierter Zubereitungstext mit erhaltenen Zeilenumbrüchen |
 | `preparationImages` | `PreparationImage[] \| undefined` | optionale Bilder mit Schrittposition |
 | `ingredients` | `Ingredient[]` | Zutaten des Rezepts |
@@ -359,36 +358,36 @@ Vercel:
 
 - Das Projekt ist für statisches Vite-Hosting geeignet.
 - `vercel.json` definiert Security-Header für alle Pfade.
-- Es sind aktuell keine Environment Variables im Anwendungscode vorgesehen.
+- Supabase wird über `VITE_SUPABASE_URL` und `VITE_SUPABASE_ANON_KEY` beziehungsweise den vorhandenen Publishable-Key konfiguriert.
 - GitHub-Verbindung oder ein konkretes bestehendes Vercel-Projekt sind im Repository nicht dokumentiert.
 - `dist/` und `node_modules/` sind laut `.gitignore` ausgeschlossen.
 
-Die veröffentlichten Frontend-Dateien enthalten nur die App und Seed-Rezepte. Benutzerinhalte aus `localStorage` werden nicht an Vercel übertragen und nicht durch Vercel geteilt. Markdown wird im Frontend mit `react-markdown`, `remark-gfm` und `rehype-sanitize` verarbeitet; `rehype-raw` wird nicht verwendet.
+Die veröffentlichten Frontend-Dateien enthalten die App; Benutzerinhalte werden ausschließlich über Supabase und RLS-geschützte Tabellen geladen. Markdown wird im Frontend mit `react-markdown`, `remark-gfm` und `rehype-sanitize` verarbeitet; `rehype-raw` wird nicht verwendet.
 
 ### Vercel-Checkliste
 
 1. Framework-Preset: Vite.
 2. Build command: `npm run build`.
 3. Output directory: `dist`.
-4. Keine Environment Variables sind aktuell erforderlich.
+4. `VITE_SUPABASE_URL` und ein öffentlicher Supabase-Key müssen als Environment Variables gesetzt sein.
 5. Falls später Variablen ergänzt werden: echte Geheimnisse niemals mit `VITE_` oder `NEXT_PUBLIC_` prefixen. Solche Frontend-Variablen werden in das öffentliche JavaScript eingebaut.
-6. Preview Deployments enthalten dieselbe öffentliche App. Keine vertraulichen Daten in Seed-Dateien, `localStorage`-Defaults oder Frontend-Variablen ablegen.
+6. Preview Deployments enthalten dieselbe öffentliche App. Keine vertraulichen Daten oder Service-Role-Keys in Frontend-Variablen ablegen.
 7. HTTPS, Custom Domain und die Header aus `vercel.json` vor dem ersten Production-Deployment prüfen.
 
 Es gibt aktuell keine öffentlich erreichbaren Funktionen, für die serverseitiges Rate Limiting, Authorization, CSRF-Schutz, RLS oder Datenbank-Credentials erforderlich wären. Diese Aussage gilt nicht automatisch nach einer späteren Einführung von Login, Cloud-Synchronisation oder externen APIs.
 
 ## 10. Sicherheit
 
-- Keine Authentifizierung
-- Keine Datenbank
+- Supabase-Authentifizierung über Email und Passwort
+- Supabase-Datenbank mit RLS-geschützten Tabellen
 - Keine API-Endpunkte
-- Keine Supabase-Integration
-- Keine RLS-Regeln oder Storage-Buckets
-- Keine verwendeten Environment Variables
+- Supabase-Integration mit privaten Storage-Buckets
+- Zugriffsschutz wird durch Supabase-RLS und Benutzerfilter vorausgesetzt
+- Öffentliche Supabase-Environment Variables werden verwendet; Service-Role-Keys niemals im Frontend
 - Keine `VITE_`-Secrets oder Service-Role-Keys im Frontend
 - Markdown wird über `react-markdown` und `rehype-sanitize` gerendert; HTML, Skripte, Eventattribute und eingebettete Bilder werden nicht als aktive Inhalte zugelassen
 - Markdown- und Videolinks werden auf `http:` und `https:` begrenzt
-- Rezeptbilder werden ausschließlich lokal als Data-URL gespeichert
+- Rezeptbilder werden als Pfade in privaten Buckets gespeichert und über signierte URLs angezeigt
 - Upload-Limits: JPEG/PNG/WebP, maximal 2 MB, maximal 4096 Pixel je Dimension, erfolgreiche Bilddekodierung erforderlich
 - Vercel-Header: CSP, `Permissions-Policy`, `Referrer-Policy`, `X-Content-Type-Options`, `X-Frame-Options`
 
@@ -399,20 +398,20 @@ Es gibt aktuell keine öffentlich erreichbaren Funktionen, für die serverseitig
 | 🟢 | Keine API, Datenbank, Authentifizierung oder Benutzerkonten | Keine serverseitige Angriffsfläche in diesem Projekt | Keine zusätzliche Maßnahme für die aktuelle Architektur | Geprüft |
 | 🟢 | Keine gefundenen Secrets oder Environment-Variablen im Frontend | Keine aktuell sichtbaren Zugangsdaten | `.env`-Dateien sind ignoriert; Git- und Textsuche geprüft | Geprüft |
 | 🟢 | Markdown kann Benutzereingaben enthalten | Unsanitisiertes HTML könnte XSS auslösen | Sanitization, `skipHtml`, restriktive Link-/Bildregeln und Regressionstests | Behoben |
-| 🟡 | Speicherung in `localStorage` | Daten sind nicht vertraulich, nicht synchronisiert und durch den Benutzer manipulierbar | Nur für persönliche lokale Nutzung; keine Geheimnisse speichern | Bewusste Einschränkung |
-| 🟡 | Bilder als Data-URLs | Hoher Speicherverbrauch und begrenzte Skalierung | Gemeinsame Größen-/Dekodierungsprüfung und maximal 8 Zubereitungsbilder | Gehärtet |
+| 🟢 | Supabase-Persistenz | Zugriff und RLS-Konfiguration müssen korrekt gepflegt werden | Tabellen- und Storage-RLS pro Benutzer prüfen | Offen vor Deployment |
+| 🟢 | Private Bild-Buckets | Direkte öffentliche URLs wären ungewollt zugänglich | Storage-Pfade speichern und signierte URLs erzeugen | Umgesetzt |
 | 🟡 | Keine serverseitige Rate-Limit-/Authorization-Schicht | Bei späterem Backend wären Frontend-Prüfungen nicht ausreichend | Vor Cloud-/Login-Funktionen serverseitige Zugriffskontrollen einführen | Nicht relevant im aktuellen Scope |
 | 🟡 | Kein Lint-Script | Stil- und bestimmte statische Fehler werden nicht durch einen eigenen Lint-Schritt geprüft | Vor größerem Ausbau ESLint/TypeScript-Linting ergänzen | Offen, kein unmittelbares Security-Problem |
 
-**Kann ich die App in ihrem aktuellen Zustand öffentlich auf Vercel deployen: JA, für die aktuelle rein lokale Einzelbenutzer-App.** `npm audit`, Build, Tests, `npm ci --dry-run`, Git-Prüfung und TypeScript-Diagnostics sind erfolgreich. Die App ist nicht als Mehrbenutzer- oder vertrauliche Datenspeicherlösung freigegeben. Ein eigenes Lint-Script fehlt weiterhin.
+**Kann ich die App in ihrem aktuellen Zustand öffentlich auf Vercel deployen: JA, sofern Supabase-RLS und Storage-Policies geprüft sind.** Build und Tests sind erfolgreich. Ein eigenes Lint-Script fehlt weiterhin.
 
-Die öffentliche URL macht die App-Oberfläche erreichbar. Sie macht die `localStorage`-Daten eines anderen Browsers nicht direkt lesbar. Ein Besucher kann jedoch den öffentlich ausgelieferten JavaScript-Code einsehen und eine eigene lokale App-Instanz verwenden.
+Die öffentliche URL macht die App-Oberfläche erreichbar. Datenzugriff und private Bilder müssen durch Supabase-RLS und Storage-Policies auf den eingeloggten Benutzer begrenzt sein.
 
 ## 11. Bereits getroffene wichtige Entscheidungen
 
 - Vite/React/TypeScript als aktuelle Frontend-Basis
 - Vercel als vorgesehener statischer Deployment-Ort
-- lokale Speicherung ohne Backend für den aktuellen persönlichen Einsatz
+- Supabase Auth, PostgreSQL und private Storage-Buckets als Backend
 - Rezeptportionen als Basis für die automatische Einkaufsberechnung
 - Zutatenzusammenführung über normalisierten Namen und Einheit
 - einzelne Lebensmittel können ohne eigenes Rezept geplant werden
@@ -425,15 +424,15 @@ Diese Entscheidungen sollten nicht ohne Prüfung der Auswirkungen auf lokale Dat
 
 ## 12. Bekannte Probleme / technische Schulden
 
-- **Problem:** Daten werden nur im Browser-`localStorage` gespeichert.
-  **Auswirkung:** Keine Synchronisation zwischen iPhone und PC; Browserdaten können gelöscht werden.
-  **Status:** Aktuelles Architekturverhalten.
+- **Prüfpunkt:** Supabase-RLS und Storage-Policies müssen pro Benutzer korrekt konfiguriert sein.
+  **Auswirkung:** Fehlende Policies könnten Datenzugriff oder Uploads blockieren beziehungsweise zu weit öffnen.
+  **Status:** Vor Deployment im Supabase-Projekt prüfen.
   **Priorität:** mittel
 
-- **Problem:** Bilder werden als Base64-Data-URLs im Rezept gespeichert.
-  **Auswirkung:** Relativ hoher `localStorage`-Verbrauch und begrenzte Skalierbarkeit.
-  **Status:** Für lokale Einzelverwendung akzeptiert; kein Server-Upload vorhanden.
-  **Priorität:** mittel
+- **Problem:** Signierte Bild-URLs laufen nach einer Stunde ab.
+  **Auswirkung:** Bereits geladene Datensätze benötigen beim erneuten Laden neue URLs.
+  **Status:** Beim Laden werden URLs neu signiert.
+  **Priorität:** niedrig
 
 - **Problem:** Der Planer speichert aktuell keinen konkreten Zeitraum.
   **Auswirkung:** Keine echte Wochenhistorie oder Datumsnavigation.
@@ -472,7 +471,7 @@ Keine weiteren Funktionen sind aus dem aktuellen Code zwingend abzuleiten. Neue 
 - Bestehende Funktionen und lokale Datenmigration nicht ohne Grund entfernen.
 - Keine neue Library einführen, wenn React, TypeScript und die vorhandenen Hilfsfunktionen ausreichen.
 - Mobile Darstellung auf kleinen iPhone-Bildschirmen mit berücksichtigen.
-- Datenmodelländerungen auf alte `localStorage`-Daten und Migration prüfen.
+- Datenmodelländerungen auf bestehende Supabase-Daten und Migration prüfen.
 - Einkaufslogik nicht ändern, ohne Auswirkungen auf Portionen, Zutatenzusammenführung und Einzel-Lebensmittel zu prüfen.
 - Keine Secrets, API-Keys oder privaten Daten committen.
 - Keine `VITE_`-Variable für echte Geheimnisse verwenden; Frontend-Variablen sind öffentlich.

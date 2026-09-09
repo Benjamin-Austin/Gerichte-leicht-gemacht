@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { User } from "@supabase/supabase-js";
 import {
   Check,
   ClipboardList,
@@ -11,7 +12,6 @@ import {
   Utensils,
   X,
 } from "lucide-react";
-import { seedRecipes } from "./data/seedRecipes";
 import {
   createIngredient,
   formatQuantity,
@@ -22,8 +22,10 @@ import {
 import { generateShoppingList, groupByCategory } from "./lib/shopping-list";
 import { MarkdownContent } from "./lib/markdown";
 import { storage } from "./lib/storage";
+import { supabase } from "./lib/supabase";
 import { getSafeHttpUrl } from "./lib/urls";
 import { validateImageFile } from "./lib/uploads";
+import Login from "./components/Login";
 import {
   GROCERY_CATEGORIES,
   MEAL_TYPES,
@@ -41,20 +43,19 @@ import {
 const emptyPlan: WeeklyPlan = { mealSlots: [] };
 const categoryColors = ["#e2b27e", "#9ebc9e", "#d99a8e", "#aab8d8", "#c9b68a"];
 function newId(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  return crypto.randomUUID();
 }
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [dataReady, setDataReady] = useState(false);
+  const [storageError, setStorageError] = useState("");
   const [tab, setTab] = useState<Tab>("planner");
-  const [recipes, setRecipes] = useState<Recipe[]>(() =>
-    storage.loadRecipes(seedRecipes),
-  );
-  const [plan, setPlan] = useState<WeeklyPlan>(() =>
-    storage.loadPlan(emptyPlan),
-  );
-  const [shopping, setShopping] = useState<ShoppingItem[]>(() =>
-    storage.loadShopping([]),
-  );
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [plan, setPlan] = useState<WeeklyPlan>(emptyPlan);
+  const [shopping, setShopping] = useState<ShoppingItem[]>([]);
   const [hiddenShoppingIds, setHiddenShoppingIds] = useState<string[]>([]);
   const [recipeEditor, setRecipeEditor] = useState<Recipe | null>(null);
   const [pickerMeal, setPickerMeal] = useState<MealType | null>(null);
@@ -63,6 +64,54 @@ export default function App() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
+      if (error) setStorageError(error.message);
+      setUser(data.session?.user ?? null);
+      setSessionLoading(false);
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setSessionLoading(false);
+    });
+    return () => {
+      mounted = false;
+      data.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setDataReady(false);
+      setRecipes([]);
+      setPlan(emptyPlan);
+      setShopping([]);
+      return;
+    }
+    let cancelled = false;
+    setDataLoading(true);
+    setStorageError("");
+    Promise.all([
+      storage.loadRecipes([]),
+      storage.loadPlan(emptyPlan),
+      storage.loadShopping([]),
+    ]).then(([loadedRecipes, loadedPlan, loadedShopping]) => {
+      if (cancelled) return;
+      setRecipes(loadedRecipes);
+      setPlan(loadedPlan);
+      setShopping(loadedShopping);
+      setHiddenShoppingIds(loadedShopping.filter((item) => item.hidden).map((item) => item.id));
+      setDataReady(true);
+    }).catch((error: Error) => {
+      if (!cancelled) setStorageError(error.message);
+    }).finally(() => {
+      if (!cancelled) setDataLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [user]);
   const selectedRecipes = plan.mealSlots
     .map((slot) => ({
       slot,
@@ -100,22 +149,36 @@ export default function App() {
       .includes(search.toLocaleLowerCase("de-DE")),
   );
 
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
-    storage.saveRecipes(recipes);
-  }, [recipes]);
+    if (!dataReady || !user) return;
+    void (async () => {
+      setSaving(true);
+      try { await storage.saveRecipes(recipes); } catch (error) { setStorageError((error as Error).message); } finally { setSaving(false); }
+    })();
+  }, [recipes, dataReady, user]);
   useEffect(() => {
-    storage.savePlan(plan);
-  }, [plan]);
+    if (!dataReady || !user) return;
+    void (async () => {
+      setSaving(true);
+      try { await storage.savePlan(plan); } catch (error) { setStorageError((error as Error).message); } finally { setSaving(false); }
+    })();
+  }, [plan, dataReady, user]);
   useEffect(() => {
+    if (!dataReady || !user) return;
     const nextShopping = baseShopping.map((item) => ({
       ...item,
       checked: shopping.some(
         (stored) => stored.id === item.id && stored.checked,
       ),
+      hidden: hiddenShoppingIds.includes(item.id),
     }));
     setShopping(nextShopping);
-    storage.saveShopping(nextShopping);
-  }, [baseShopping]);
+    void (async () => {
+      setSaving(true);
+      try { await storage.saveShopping(nextShopping); } catch (error) { setStorageError((error as Error).message); } finally { setSaving(false); }
+    })();
+  }, [baseShopping, dataReady, hiddenShoppingIds, user]);
   useEffect(() => {
     document.body.classList.toggle(
       "modal-open",
@@ -186,8 +249,14 @@ export default function App() {
     );
   }
 
+  if (sessionLoading) return <div className="auth-state">Anmeldung wird geprüft ...</div>;
+  if (!user) return <Login />;
+  if (dataLoading || !dataReady) return <div className="auth-state">Daten werden geladen ...</div>;
+  if (storageError) return <div className="auth-state"><p>{storageError}</p><button className="primary-button" onClick={() => window.location.reload()}>Erneut versuchen</button></div>;
+
   return (
     <div className="app-shell">
+      {saving && <div className="saving-indicator" role="status">Speichern ...</div>}
       <main className="main-content">
         {tab === "planner" && (
           <Planner
@@ -912,6 +981,7 @@ function FoodPicker({
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState("");
   const [customName, setCustomName] = useState("");
+  const [customOpen, setCustomOpen] = useState(false);
   const [customCategory, setCustomCategory] = useState<GroceryCategory>("Sonstiges");
   const [quantity, setQuantity] = useState(1);
   const [unit, setUnit] = useState("Stück");
@@ -947,6 +1017,8 @@ function FoodPicker({
               key={item.id}
               onClick={() => {
                 setSelected(item.name);
+                setCustomOpen(false);
+                setCustomName("");
                 setUnit(item.defaultUnit ?? "Stück");
               }}
             >
@@ -955,13 +1027,46 @@ function FoodPicker({
           ))}
         </div>
         {query && filtered.length === 0 && (
-          <div className="food-details custom-food-details">
-            <strong>Eigenen Eintrag hinzufügen</strong>
-            <label>Name<input value={customName} onChange={(event) => setCustomName(event.target.value)} placeholder={query} /></label>
-            <label>Kategorie<select value={customCategory} onChange={(event) => setCustomCategory(event.target.value as GroceryCategory)}>{GROCERY_CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></label>
+          <div className="custom-ingredient-panel">
+            {!customOpen ? (
+              <button
+                className="secondary-button full-width"
+                onClick={() => {
+                  setCustomName(query.trim());
+                  setCustomOpen(true);
+                }}
+              >
+                <Plus size={17} /> Eigenen Eintrag hinzufügen
+              </button>
+            ) : (
+              <div className="food-details custom-food-details">
+                <strong>Eigenen Eintrag hinzufügen</strong>
+                <label>
+                  Name
+                  <input
+                    value={customName}
+                    onChange={(event) => setCustomName(event.target.value)}
+                    placeholder={query}
+                  />
+                </label>
+                <label>
+                  Kategorie
+                  <select
+                    value={customCategory}
+                    onChange={(event) =>
+                      setCustomCategory(event.target.value as GroceryCategory)
+                    }
+                  >
+                    {GROCERY_CATEGORIES.map((category) => (
+                      <option key={category}>{category}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
           </div>
         )}
-        {selected && (
+        {(selected || customOpen) && (
           <div className="food-details">
             <strong>{selected}</strong>
             <label>
@@ -993,9 +1098,13 @@ function FoodPicker({
           <button
             className="primary-button full-width"
             disabled={!selected && !customName.trim()}
-            onClick={() =>
-              onConfirm({ ...createIngredient(selected || customName, quantity, unit), category: selected ? createIngredient(selected, quantity, unit).category : customCategory })
-            }
+            onClick={() => {
+              const ingredient = createIngredient(selected || customName, quantity, unit);
+              onConfirm({
+                ...ingredient,
+                category: selected ? ingredient.category : customCategory,
+              });
+            }}
           >
             Artikel hinzufügen
           </button>
@@ -1054,6 +1163,8 @@ function RecipeForm({
     }));
     setQuantityDrafts((current) => ({ ...current, [ingredient.id]: String(ingredient.quantity) }));
     setIngredientQuery("");
+    setCustomIngredientName("");
+    setCustomIngredientOpen(false);
     setIngredientSearchOpen(false);
   }
   function addCustomIngredient() {
@@ -1107,19 +1218,19 @@ function RecipeForm({
     });
   }
   function uploadImage(file: File) {
-    validateImageFile(file)
-      .then(({ dataUrl }) => setDraft((current) => ({ ...current, imageUrl: dataUrl })))
+    validateImageFile(file, { bucket: "recipe-covers", recipeId: draft.id })
+      .then(({ storagePath, imageUrl }) => setDraft((current) => ({ ...current, imagePath: storagePath, imageUrl })))
       .catch((uploadError: Error) => setError(uploadError.message));
   }
   function uploadPreparationImage(file: File) {
     if ((draft.preparationImages?.length ?? 0) >= 8)
       return setError("Pro Rezept sind höchstens 8 Zubereitungsbilder möglich.");
-    validateImageFile(file)
-      .then(({ dataUrl }) => setDraft((current) => ({
+    validateImageFile(file, { bucket: "preparation-images", recipeId: draft.id })
+      .then(({ storagePath, imageUrl }) => setDraft((current) => ({
         ...current,
         preparationImages: [
           ...(current.preparationImages ?? []),
-          { id: newId("preparation-image"), dataUrl, step: preparationImageStep },
+          { id: newId("preparation-image"), storagePath, imageUrl, step: preparationImageStep },
         ],
       })))
       .catch((uploadError: Error) => setError(uploadError.message));
@@ -1245,7 +1356,7 @@ function RecipeForm({
             <div className="preparation-image-list">
               {(draft.preparationImages ?? []).map((image) => (
                 <div className="preparation-image-item" key={image.id}>
-                  <img src={image.dataUrl} alt="" />
+                  {image.imageUrl && <img src={image.imageUrl} alt="" />}
                   <label>
                     Position
                     <input
@@ -1357,7 +1468,13 @@ function RecipeForm({
                 <div className="custom-ingredient-panel">
                   <p className="form-error">Keine passende Zutat gefunden.</p>
                   {!customIngredientOpen ? (
-                    <button className="secondary-button" onClick={() => setCustomIngredientOpen(true)}>
+                    <button
+                      className="secondary-button"
+                      onClick={() => {
+                        setCustomIngredientName(ingredientQuery.trim());
+                        setCustomIngredientOpen(true);
+                      }}
+                    >
                       <Plus size={17} /> Eigene Zutat hinzufügen
                     </button>
                   ) : (
@@ -1516,7 +1633,7 @@ function RecipeDetail({
             <h3>Zubereitung</h3>
             <MarkdownContent content={recipe.preparation ?? ""} />
             {recipe.preparationImages?.map((image) => (
-              <img className="preparation-detail-image" key={image.id} src={image.dataUrl} alt={`Zubereitungsbild nach Schritt ${image.step + 1}`} />
+              image.imageUrl ? <img className="preparation-detail-image" key={image.id} src={image.imageUrl} alt={`Zubereitungsbild nach Schritt ${image.step + 1}`} /> : null
             ))}
           </section>
         )}
