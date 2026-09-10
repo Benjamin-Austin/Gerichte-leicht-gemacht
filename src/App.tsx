@@ -52,7 +52,10 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(false);
   const [dataReady, setDataReady] = useState(false);
   const [storageError, setStorageError] = useState("");
-  const [tab, setTab] = useState<Tab>("planner");
+  const [tab, setTab] = useState<Tab>(() => {
+    const savedTab = localStorage.getItem("sonntagskueche:last-tab");
+    return (savedTab as Tab) || "planner";
+  });
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [plan, setPlan] = useState<WeeklyPlan>(emptyPlan);
   const [shopping, setShopping] = useState<ShoppingItem[]>([]);
@@ -65,6 +68,21 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
   const recipesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const planSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem("sonntagskueche:last-tab", tab);
+  }, [tab]);
+
+  useEffect(() => {
+    if (!recipeEditor) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [recipeEditor]);
 
   useEffect(() => {
     let mounted = true;
@@ -170,10 +188,16 @@ export default function App() {
   }, [recipes, dataReady, user]);
   useEffect(() => {
     if (!dataReady || !user) return;
-    void (async () => {
-      setSaving(true);
-      try { await storage.savePlan(plan); } catch (error) { setStorageError((error as Error).message); } finally { setSaving(false); }
-    })();
+    if (planSaveTimer.current) clearTimeout(planSaveTimer.current);
+    planSaveTimer.current = setTimeout(() => {
+      void (async () => {
+        setSaving(true);
+        try { await storage.savePlan(plan); } catch (error) { setStorageError((error as Error).message); } finally { setSaving(false); }
+      })();
+    }, 500);
+    return () => {
+      if (planSaveTimer.current) clearTimeout(planSaveTimer.current);
+    };
   }, [plan, dataReady, user]);
   useEffect(() => {
     if (!dataReady || !user) return;
@@ -217,6 +241,14 @@ export default function App() {
   }
   function deleteRecipe(id: string) {
     if (!window.confirm("Rezept wirklich löschen?")) return;
+    const recipe = recipes.find((item) => item.id === id);
+    if (recipe?.imagePath) {
+      void supabase.storage.from("recipe-covers").remove([recipe.imagePath]);
+    }
+    const prepPaths = (recipe?.preparationImages ?? []).map((image) => image.storagePath);
+    if (prepPaths.length) {
+      void supabase.storage.from("preparation-images").remove(prepPaths);
+    }
     setRecipes((current) => current.filter((recipe) => recipe.id !== id));
     setPlan((current) => ({
       mealSlots: current.mealSlots.filter((slot) => slot.recipeId !== id),
@@ -238,7 +270,7 @@ export default function App() {
           id: newId("slot"),
           recipeId,
           mealType,
-          servings: 1,
+          servings: recipes.find((r) => r.id === recipeId)?.servings ?? 4,
         })),
       ],
     }));
@@ -415,7 +447,7 @@ export default function App() {
                         id: newId("slot"),
                         recipeId: recipeDetail.recipe.id,
                         mealType: "Mittagessen",
-                        servings: 1,
+                        servings: recipeDetail.recipe.servings ?? 4,
                       },
                     ],
                   },
@@ -661,9 +693,13 @@ function Recipes({
   selectedIds: string[];
 }) {
   const [category, setCategory] = useState("Alle");
-  const filtered = recipes.filter(
-    (recipe) => category === "Alle" || recipe.category === category,
-  );
+  const filtered = recipes.filter((recipe) => {
+    if (category === "Alle") return true;
+    if (category === "Vegetarisch") {
+      return recipe.category === "Vegetarisch" || recipe.category === "Vegan";
+    }
+    return recipe.category === category;
+  });
   return (
     <section className="page-section">
       <div className="page-heading">
@@ -1229,8 +1265,14 @@ function RecipeForm({
     });
   }
   function uploadImage(file: File) {
+    const previousPath = draft.imagePath;
     validateImageFile(file, { bucket: "recipe-covers", recipeId: draft.id })
-      .then(({ storagePath, imageUrl }) => setDraft((current) => ({ ...current, imagePath: storagePath, imageUrl })))
+      .then(({ storagePath, imageUrl }) => {
+        setDraft((current) => ({ ...current, imagePath: storagePath, imageUrl }));
+        if (previousPath && previousPath !== storagePath) {
+          void supabase.storage.from("recipe-covers").remove([previousPath]);
+        }
+      })
       .catch((uploadError: Error) => setError(uploadError.message));
   }
   function uploadPreparationImage(file: File) {
@@ -1381,7 +1423,17 @@ function RecipeForm({
                       }))}
                     />
                   </label>
-                  <button className="delete-button" aria-label="Zubereitungsbild entfernen" onClick={() => setDraft((current) => ({ ...current, preparationImages: (current.preparationImages ?? []).filter((item) => item.id !== image.id) }))}>
+                  <button
+                    className="delete-button"
+                    aria-label="Zubereitungsbild entfernen"
+                    onClick={() => {
+                      void supabase.storage.from("preparation-images").remove([image.storagePath]);
+                      setDraft((current) => ({
+                        ...current,
+                        preparationImages: (current.preparationImages ?? []).filter((item) => item.id !== image.id),
+                      }));
+                    }}
+                  >
                     <Trash2 size={17} />
                   </button>
                 </div>
@@ -1668,9 +1720,11 @@ function RecipeDetail({
           <button className="secondary-button" onClick={onEdit}>
             <Edit3 size={17} /> Bearbeiten
           </button>
-          <button className="primary-button" onClick={onAddToPlanner}>
-            <Plus size={17} /> Zum Planer hinzufügen
-          </button>
+          {origin !== "planner" && (
+            <button className="primary-button" onClick={onAddToPlanner}>
+              <Plus size={17} /> Zum Planer hinzufügen
+            </button>
+          )}
         </div>
       </article>
     </div>

@@ -185,7 +185,7 @@ async function loadPlan(fallback: WeeklyPlan): Promise<WeeklyPlan> {
   })) })
 }
 
-async function savePlan(plan: WeeklyPlan): Promise<void> {
+async function savePlanNow(plan: WeeklyPlan): Promise<void> {
   const userId = await requireUserId()
   const normalizedPlan = normalizePlan(plan)
   const { error: deleteError } = await supabase.from('plan_slots').delete().eq('user_id', userId)
@@ -197,6 +197,14 @@ async function savePlan(plan: WeeklyPlan): Promise<void> {
     ingredient_unit: slot.ingredient?.unit ?? null, ingredient_category: slot.ingredient?.category ?? null,
   })))
   if (error) throw error
+}
+
+let planSaveQueue = Promise.resolve()
+
+function savePlan(plan: WeeklyPlan): Promise<void> {
+  const save = planSaveQueue.then(() => savePlanNow(plan))
+  planSaveQueue = save.catch(() => undefined)
+  return save
 }
 
 async function loadShopping(fallback: ShoppingItem[]): Promise<ShoppingItem[]> {
