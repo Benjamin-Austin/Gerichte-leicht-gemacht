@@ -358,7 +358,9 @@ Vercel:
 
 - Das Projekt ist für statisches Vite-Hosting geeignet.
 - `vercel.json` definiert Security-Header für alle Pfade.
-- Supabase wird über `VITE_SUPABASE_URL` und `VITE_SUPABASE_ANON_KEY` beziehungsweise den vorhandenen Publishable-Key konfiguriert.
+- Supabase wird über die öffentlichen Vite-Variablen `VITE_SUPABASE_URL` und `VITE_SUPABASE_PUBLISHABLE_KEY` konfiguriert. Alternativ unterstützt die App `VITE_SUPABASE_ANON_KEY`.
+- Beide Variablen müssen in Vercel unter **Project Settings > Environment Variables** für **Production** gesetzt werden. Für Preview-Deployments müssen sie zusätzlich für **Preview** gesetzt werden.
+- Nach dem Anlegen oder Ändern der Variablen ist ein neuer Deployment-Build erforderlich, weil Vite `VITE_*`-Variablen beim Build in das Frontend einbettet.
 - GitHub-Verbindung oder ein konkretes bestehendes Vercel-Projekt sind im Repository nicht dokumentiert.
 - `dist/` und `node_modules/` sind laut `.gitignore` ausgeschlossen.
 
@@ -369,10 +371,17 @@ Die veröffentlichten Frontend-Dateien enthalten die App; Benutzerinhalte werden
 1. Framework-Preset: Vite.
 2. Build command: `npm run build`.
 3. Output directory: `dist`.
-4. `VITE_SUPABASE_URL` und ein öffentlicher Supabase-Key müssen als Environment Variables gesetzt sein.
-5. Falls später Variablen ergänzt werden: echte Geheimnisse niemals mit `VITE_` oder `NEXT_PUBLIC_` prefixen. Solche Frontend-Variablen werden in das öffentliche JavaScript eingebaut.
-6. Preview Deployments enthalten dieselbe öffentliche App. Keine vertraulichen Daten oder Service-Role-Keys in Frontend-Variablen ablegen.
-7. HTTPS, Custom Domain und die Header aus `vercel.json` vor dem ersten Production-Deployment prüfen.
+4. Diese Environment Variables setzen:
+
+  ```text
+  VITE_SUPABASE_URL=https://<projekt-id>.supabase.co
+  VITE_SUPABASE_PUBLISHABLE_KEY=<öffentlicher-publishable-key>
+  ```
+
+5. Die Variablen mindestens für **Production**, bei Preview-Deployments auch für **Preview**, aktivieren.
+6. Nach Änderungen **Redeploy** ausführen. Fehlen die Variablen beim Build, wirft `src/lib/supabase.ts` absichtlich einen Konfigurationsfehler, bevor die React-Oberfläche gerendert wird.
+7. Keine vertraulichen Daten oder Service-Role-Keys mit `VITE_` oder `NEXT_PUBLIC_` prefixen. Diese Variablen werden in das öffentliche JavaScript eingebaut; der Publishable-Key ist dagegen für den Client vorgesehen.
+8. HTTPS, Custom Domain und die Header aus `vercel.json` vor dem ersten Production-Deployment prüfen. Die CSP erlaubt Supabase-API-Verbindungen sowie signierte Bilder über `https://*.supabase.co` und Realtime über `wss://*.supabase.co`.
 
 Es gibt aktuell keine öffentlich erreichbaren Funktionen, für die serverseitiges Rate Limiting, Authorization, CSRF-Schutz, RLS oder Datenbank-Credentials erforderlich wären. Diese Aussage gilt nicht automatisch nach einer späteren Einführung von Login, Cloud-Synchronisation oder externen APIs.
 

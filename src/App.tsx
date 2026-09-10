@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
   Check,
@@ -64,6 +64,7 @@ export default function App() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
+  const recipesSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -156,10 +157,16 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (!dataReady || !user) return;
-    void (async () => {
-      setSaving(true);
-      try { await storage.saveRecipes(recipes); } catch (error) { setStorageError((error as Error).message); } finally { setSaving(false); }
-    })();
+    if (recipesSaveTimer.current) clearTimeout(recipesSaveTimer.current);
+    recipesSaveTimer.current = setTimeout(() => {
+      void (async () => {
+        setSaving(true);
+        try { await storage.saveRecipes(recipes); } catch (error) { setStorageError((error as Error).message); } finally { setSaving(false); }
+      })();
+    }, 800);
+    return () => {
+      if (recipesSaveTimer.current) clearTimeout(recipesSaveTimer.current);
+    };
   }, [recipes, dataReady, user]);
   useEffect(() => {
     if (!dataReady || !user) return;

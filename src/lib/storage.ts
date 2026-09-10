@@ -123,7 +123,7 @@ async function loadRecipes(fallback: Recipe[]): Promise<Recipe[]> {
   return Promise.all((data as DbRecipe[]).map(mapRecipe))
 }
 
-async function saveRecipes(recipes: Recipe[]): Promise<void> {
+async function saveRecipesNow(recipes: Recipe[]): Promise<void> {
   const userId = await requireUserId()
   const normalizedRecipes: Recipe[] = recipes.map(normalizeRecipe)
   const { data: existing, error: existingError } = await supabase.from('recipes').select('id').eq('user_id', userId)
@@ -145,7 +145,7 @@ async function saveRecipes(recipes: Recipe[]): Promise<void> {
     const { error: ingredientDeleteError } = await supabase.from('ingredients').delete().eq('recipe_id', recipe.id)
     if (ingredientDeleteError) throw ingredientDeleteError
     if (recipe.ingredients.length) {
-      const { error } = await supabase.from('ingredients').insert(recipe.ingredients.map((ingredient) => ({
+      const { error } = await supabase.from('ingredients').upsert(recipe.ingredients.map((ingredient) => ({
         id: databaseId(ingredient.id), recipe_id: recipe.id, name: ingredient.name, normalized_name: normalizeIngredientName(ingredient.name),
         quantity: ingredient.quantity, unit: ingredient.unit, category: ingredient.category,
       })))
@@ -154,12 +154,20 @@ async function saveRecipes(recipes: Recipe[]): Promise<void> {
     const { error: imageDeleteError } = await supabase.from('preparation_images').delete().eq('recipe_id', recipe.id)
     if (imageDeleteError) throw imageDeleteError
     if (recipe.preparationImages?.length) {
-      const { error } = await supabase.from('preparation_images').insert(recipe.preparationImages.map((image) => ({
+      const { error } = await supabase.from('preparation_images').upsert(recipe.preparationImages.map((image) => ({
         id: image.id, recipe_id: recipe.id, storage_path: image.storagePath, step: image.step,
       })))
       if (error) throw error
     }
   }
+}
+
+let recipesSaveQueue = Promise.resolve()
+
+function saveRecipes(recipes: Recipe[]): Promise<void> {
+  const save = recipesSaveQueue.then(() => saveRecipesNow(recipes))
+  recipesSaveQueue = save.catch(() => undefined)
+  return save
 }
 
 async function loadPlan(fallback: WeeklyPlan): Promise<WeeklyPlan> {
