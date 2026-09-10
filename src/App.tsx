@@ -262,8 +262,8 @@ export default function App() {
 
   if (sessionLoading) return <div className="auth-state">Anmeldung wird geprüft ...</div>;
   if (!user) return <Login />;
-  if (dataLoading || !dataReady) return <div className="auth-state">Daten werden geladen ...</div>;
   if (storageError) return <div className="auth-state"><p>{storageError}</p><button className="primary-button" onClick={() => window.location.reload()}>Erneut versuchen</button></div>;
+  if (dataLoading || !dataReady) return <div className="auth-state">Daten werden geladen ...</div>;
 
   return (
     <div className="app-shell">
