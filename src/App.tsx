@@ -74,7 +74,11 @@ export default function App() {
       setSessionLoading(false);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const nextUser = session?.user ?? null;
+      setUser((current) => {
+        if (current?.id === nextUser?.id) return current;
+        return nextUser;
+      });
       setSessionLoading(false);
     });
     return () => {
